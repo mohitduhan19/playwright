@@ -1,0 +1,50 @@
+name: verify-43597
+
+on:
+  push:
+    branches:
+      - fix-43597
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium firefox webkit
+
+      - name: Without the fix, the new assertion fails on Firefox
+        run: |
+          git show 20a2087ea43412b90c172c88faef80786ee18b8b:packages/playwright-core/src/server/firefox/ffNetworkManager.ts > packages/playwright-core/src/server/firefox/ffNetworkManager.ts
+          npm run build
+          if npm run ftest -- tests/library/browsercontext-user-agent.spec.ts --grep "UA-001" --retries=0; then
+            echo "Expected UA-001 to fail on Firefox without the fix"
+            exit 1
+          fi
+          git checkout -- packages/playwright-core/src/server/firefox/ffNetworkManager.ts
+
+      - name: Build with the fix
+        run: npm run build
+
+      - name: User-Agent tests on all browsers
+        run: |
+          npm run ctest -- tests/library/browsercontext-user-agent.spec.ts --retries=0
+          npm run ftest -- tests/library/browsercontext-user-agent.spec.ts --retries=0
+          npm run wtest -- tests/library/browsercontext-user-agent.spec.ts --retries=0
+
+      - name: Firefox network and interception tests
+        run: |
+          npm run ftest -- tests/page/page-route.spec.ts tests/page/page-request-continue.spec.ts tests/page/page-request-fulfill.spec.ts tests/page/page-request-intercept.spec.ts tests/page/page-network-request.spec.ts tests/library/browsercontext-route.spec.ts tests/library/browsercontext-fetch.spec.ts tests/library/browsercontext-network-event.spec.ts --retries=2
+
+      - name: Firefox network and interception tests on unchanged main (baseline)
+        if: failure()
+        run: |
+          git show 20a2087ea43412b90c172c88faef80786ee18b8b:packages/playwright-core/src/server/firefox/ffNetworkManager.ts > packages/playwright-core/src/server/firefox/ffNetworkManager.ts
+          npm run build
+          npm run ftest -- tests/page/page-route.spec.ts tests/page/page-request-continue.spec.ts tests/page/page-request-fulfill.spec.ts tests/page/page-request-intercept.spec.ts tests/page/page-network-request.spec.ts tests/library/browsercontext-route.spec.ts tests/library/browsercontext-fetch.spec.ts tests/library/browsercontext-network-event.spec.ts --retries=2 || true
